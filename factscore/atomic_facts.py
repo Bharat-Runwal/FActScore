@@ -18,12 +18,17 @@ nltk.download("punkt")
 
 
 class AtomicFactGenerator(object):
-    def __init__(self, key_path, demon_dir, gpt3_cache_file=None):
+    def __init__(self, key_path, demon_dir, af_model_name="ChatGPT", af_model_version=None, gpt3_cache_file=None, 
+                 is_bio=True, num_ex=4, openai_org=None):
         self.nlp = spacy.load("en_core_web_sm")
-        self.is_bio = True
+        self.is_bio = is_bio # was always True before 
+        self.num_ex = num_ex # original default 8, my default 4
+        self.af_model_name = af_model_name
         self.demon_path = os.path.join(demon_dir, "demons.json" if self.is_bio else "demons_complex.json")
 
-        self.openai_lm = OpenAIModel("InstructGPT", cache_file=gpt3_cache_file, key_path=key_path)
+        self.openai_lm = OpenAIModel(af_model_name, af_model_version, cache_file=gpt3_cache_file, key_path=key_path)
+        if openai_org:
+            openai.organization = openai_org
 
         # get the demos
         with open(self.demon_path, 'r') as f:
@@ -34,6 +39,42 @@ class AtomicFactGenerator(object):
 
     def save_cache(self):
         self.openai_lm.save_cache()
+
+    def get_blank_prompt(self):
+        prompt = "Please break down the following sentence into independent facts. Each fact should contain one new idea. For example:\n\n"
+        prompt += "Text: He made his acting debut in the film The Moon is the Sun's Dream (1992), and continued to appear in small and supporting roles throughout the 1990s.\n"
+        prompt += "Facts:\n"
+        prompt += "- He made his acting debut in the film.\n"
+        prompt += "- He made his acting debut in The Moon is the Sun's Dream.\n"
+        prompt += "- The Moon is the Sun's Dream is a film.\n"
+        prompt += "- The Moon is the Sun's Dream was released in 1992.\n"
+        prompt += "- After his acting debut, he appeared in small and supporting roles.\n" 
+        prompt += "- After his acting debut, he appeared in small and supporting roles throughout the 1990s.\n\n"
+
+        # prompt += "Text: He is also a successful producer and engineer, having worked with a wide variety of artists, including Willie Nelson, Tim McGraw, and Taylor Swift.\n"
+        # prompt += "Facts:\n"
+        # prompt += "- He is successful.\n"
+        # prompt += "- He is a producer.\n"
+        # prompt += "- He is an engineer.\n"
+        # prompt += "- He has worked with a wide variety of artists.\n"
+        # prompt += "- Willie Nelson is an artist.\n"
+        # prompt += "- He has worked with Willie Nelson.\n"
+        # prompt += "- Tim McGraw is an artist.\n"
+        # prompt += "- He has worked with Tim McGraw.\n"
+        # prompt += "- Taylor Swift is an artist.\n"
+        # prompt += "- He has worked with Taylor Swift.\n\n"
+
+        prompt += "Text: In 1963, Collins became one of the third group of astronauts selected by NASA and he served as the back-up Command Module Pilot for the Gemini 7 mission.\n"
+        prompt += "Facts:\n"
+        prompt += "- Collins became an astronaut.\n"
+        prompt += "- Collins became one of the third group of astronauts.\n"
+        prompt += "- Collins became one of the third group of astronauts selected.\n"
+        prompt += "- Collins became one of the third group of astronauts selected by NASA.\n"
+        prompt += "- Collins became one of the third group of astronauts selected by NASA in 1963.\n"
+        prompt += "- He served as the Command Module Pilot.\n"
+        prompt += "- He served as the back-up Command Module Pilot.\n"
+        prompt += "- He served as the Command Module Pilot for the Gemini 7 mission.\n\n"
+        return prompt 
 
     def run(self, generation, cost_estimate=None):
         """Convert the generation into a set of atomic facts. Return a total words cost if cost_estimate != None."""
@@ -60,6 +101,25 @@ class AtomicFactGenerator(object):
             assert curr_sentences == curr_sentences_2, (paragraph, curr_sentences, curr_sentences_2)
 
             sentences += curr_sentences
+        
+        # print("PRE PROCESSED SENTENCES:", sentences)
+        # my own processing of sentences
+        if self.af_model_name == "ChatGPT":
+            carry_over_sentence = ""
+            sentences_post = []
+            for k in range(len(sentences)):
+                if len(sentences[k].split()) <= 11 or sentences[k].strip("()").lower().startswith("so"):
+                    carry_over_sentence += sentences[k] + " "
+                    if k == len(sentences)-1:
+                        if len(sentences_post) > 0:
+                            sentences_post[-1] += carry_over_sentence.strip()
+                        else:
+                            sentences_post.append(carry_over_sentence.strip())
+                else:
+                    sentences_post.append(carry_over_sentence + sentences[k])
+                    carry_over_sentence = ""
+            sentences = sentences_post
+
 
         atoms_or_estimate = self.get_init_atomic_facts_from_sentence([sent for i, sent in enumerate(sentences) if not (not self.is_bio and ( \
                             (i==0 and (sent.startswith("Sure") or sent.startswith("Here are"))) or \
@@ -93,14 +153,86 @@ class AtomicFactGenerator(object):
         return atomic_facts_pairs, para_breaks
 
 
-    def get_init_atomic_facts_from_sentence(self, sentences, cost_estimate=None):
+    def get_init_atomic_facts_from_sentence_chat(self, sentences, cost_estimate=None):
         """Get the initial atomic facts from the sentences. Return a total words cost if cost_estimate != None."""
 
         is_bio = self.is_bio
         demons = self.demons
+        num_ex = self.num_ex
 
+        # k = 1 if is_bio else 0
+        # n = 7 if is_bio else 8
         k = 1 if is_bio else 0
-        n = 7 if is_bio else 8
+        n = num_ex-1 if is_bio else num_ex # num_ex - k
+
+        prompts = []
+        prompt_to_sent = {}
+        atoms = {}
+        for sentence in sentences:
+            if sentence in atoms:
+                continue
+            # top_machings = best_demos(sentence, self.bm25, list(demons.keys()), k)
+            # prompt = ""
+            # for i in range(n):
+            #     prompt = prompt + "Please breakdown the following sentence into independent facts: {}\n".format(list(demons.keys())[i])
+            #     for fact in demons[list(demons.keys())[i]]:
+            #         prompt = prompt + "- {}\n".format(fact)
+            #     prompt = prompt + "\n"
+
+            # for match in top_machings:
+            #     prompt = prompt + "Please breakdown the following sentence into independent facts: {}\n".format(match)
+            #     for fact in demons[match]:
+            #         prompt = prompt + "- {}\n".format(fact)
+            #     prompt = prompt + "\n"
+            # prompt = prompt + "Please breakdown the following sentence into independent facts: {}\n".format(sentence)
+            prompt = self.get_blank_prompt()
+            instr_prompt = ""
+            instr_prompt += "Text: {}\n".format(sentence)
+            instr_prompt += "Facts:\n"
+            # print(f"KAT: Instr prompt: {instr_prompt}")
+            prompt = prompt + instr_prompt
+            
+            prompts.append(prompt)
+            prompt_to_sent[prompt] = sentence
+        
+        # print()
+        # print("KAT: Sentences:", sentences)
+        # print("KAT: Prompts:", [p[1258-30:] for p in prompts])
+        
+
+        if cost_estimate:
+            total_words_estimate = 0
+            for prompt in prompts:
+                if cost_estimate == "consider_cache" and (prompt.strip() + "_0") in self.openai_lm.cache_dict:
+                    continue
+                total_words_estimate += len(prompt.split())
+            return total_words_estimate
+        else:
+            for prompt in prompts:
+                output, _ = self.openai_lm.generate(prompt)
+                # print("AF LM OUTPUT:", output)
+                atoms[prompt_to_sent[prompt]] = text_to_sentences(output)
+
+            # why do this???
+            # for key, value in demons.items():
+            #     if key not in atoms:
+            #         atoms[key] = value
+
+            # print("ATOMS:", atoms)
+            return atoms
+    
+    def get_init_atomic_facts_from_sentence_instruct(self, sentences, cost_estimate=None):
+        """Get the initial atomic facts from the sentences. Return a total words cost if cost_estimate != None."""
+
+        is_bio = self.is_bio
+        demons = self.demons
+        num_ex = self.num_ex
+
+        k = 1 if is_bio else 0 # k=1 means search for best demo 
+        # n = 7 if is_bio else 8 # original text 
+        # n = 3 if is_bio else 4
+        n = num_ex -1 if is_bio else num_ex 
+        print("n", n)
 
         prompts = []
         prompt_to_sent = {}
@@ -125,6 +257,11 @@ class AtomicFactGenerator(object):
             prompt = prompt + "Please breakdown the following sentence into independent facts: {}\n".format(sentence)
             prompts.append(prompt)
             prompt_to_sent[prompt] = sentence
+        
+        # print()
+        # print("Sentences:", sentences)
+        # print("Prompts:", prompts)
+        
 
         if cost_estimate:
             total_words_estimate = 0
@@ -144,6 +281,13 @@ class AtomicFactGenerator(object):
 
             return atoms
 
+    def get_init_atomic_facts_from_sentence(self, sentences, cost_estimate=None):
+        if self.af_model_name == "ChatGPT":
+            return self.get_init_atomic_facts_from_sentence_chat(sentences, cost_estimate=cost_estimate)
+        elif self.af_model_name == "InstructGPT":
+            return self.get_init_atomic_facts_from_sentence_instruct(sentences, cost_estimate=cost_estimate)
+        else:
+            raise NotImplementedError
 
 def best_demos(query, bm25, demons_sents, k):
     tokenized_query = query.split(" ")

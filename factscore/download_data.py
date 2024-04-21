@@ -88,7 +88,8 @@ def recover_instruct_llama(path_raw, output_path, device="cpu", test_recovered_m
             model=model_raw,
             tokenizer=tokenizer_raw,
         )
-    tokenizer_recovered = transformers.AutoTokenizer.from_pretrained("kalpeshk2011/instruct-llama-7b-wdiff")
+    tokenizer_recovered = transformers.AutoTokenizer.from_pretrained("kalpeshk2011/instruct-llama-7b-wdiff",
+                                                                     unk_token="<unk>", bos_token="<s>", eos_token="</s>")
 
     state_dict_recovered = model_recovered.state_dict()
     state_dict_raw = model_raw.state_dict()

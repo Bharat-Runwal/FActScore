@@ -8,8 +8,15 @@ import logging
 
 class OpenAIModel(LM):
 
-    def __init__(self, model_name, cache_file=None, key_path="api.key"):
+    def __init__(self, model_name, model_version=None, cache_file=None, key_path="api.key"):
         self.model_name = model_name
+        if model_version is None:
+            if model_name == "ChatGPT":
+                self.model_version = "gpt-3.5-turbo"
+            elif model_name == "InstructGPT":
+                self.model_version = "gpt-3.5-turbo-instruct"
+        else:
+            self.model_version = model_version
         self.key_path = key_path
         self.temp = 0.7
         self.save_interval = 100
@@ -33,13 +40,13 @@ class OpenAIModel(LM):
             # Construct the prompt send to ChatGPT
             message = [{"role": "user", "content": prompt}]
             # Call API
-            response = call_ChatGPT(message, temp=self.temp, max_len=max_sequence_length)
+            response = call_ChatGPT(message, model_name=self.model_version, temp=self.temp, max_len=max_sequence_length)
             # Get the output from the response
             output = response["choices"][0]["message"]["content"]
             return output, response
         elif self.model_name == "InstructGPT":
             # Call API
-            response = call_GPT3(prompt, temp=self.temp)
+            response = call_GPT3(prompt, model_name=self.model_version, temp=self.temp)
             # Get the output from the response
             output = response["choices"][0]["text"]
             return output, response
@@ -67,12 +74,12 @@ def call_ChatGPT(message, model_name="gpt-3.5-turbo", max_len=1024, temp=0.7, ve
                 logging.critical(f"InvalidRequestError\nPrompt passed in:\n\n{message}\n\n")
                 assert False
             
-            logging.error("API error: %s (%d). Waiting %dsec" % (error, num_rate_errors, np.power(2, num_rate_errors)))
+            logging.error("API error: %s (%d). Waiting %.2f sec" % (error, num_rate_errors, np.power(2, num_rate_errors)))
             time.sleep(np.power(2, num_rate_errors))
     return response
 
-
-def call_GPT3(prompt, model_name="text-davinci-003", max_len=512, temp=0.7, num_log_probs=0, echo=False, verbose=False):
+# replace text-davinci-003 with gpt-3.5-turbo-instruct
+def call_GPT3(prompt, model_name="gpt-3.5-turbo-instruct", max_len=512, temp=0.7, num_log_probs=0, echo=False, verbose=False):
     # call GPT-3 API until result is provided and then return it
     response = None
     received = False

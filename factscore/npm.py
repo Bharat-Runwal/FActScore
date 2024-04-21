@@ -3,6 +3,7 @@ import torch
 import time
 from collections import defaultdict
 from transformers import AutoModelForMaskedLM, AutoTokenizer
+import os 
 
 from factscore.lm import LM
 from factscore.retrieval import Retrieval
@@ -12,7 +13,7 @@ def softmax(x):
 
 class NPM(LM):
 
-    def __init__(self, bm25, model_name, cache_file):
+    def __init__(self, bm25, model_name, cache_file, data_dir=".cache/factscore"):
         assert model_name.startswith("npm")
         self.bm25 = bm25
         self.model_name = model_name
@@ -21,7 +22,7 @@ class NPM(LM):
         self.tokenizer = AutoTokenizer.from_pretrained("facebook/" + self.model_name)
         self.mask_id = self.tokenizer.mask_token_id
 
-        with open("roberta_stopwords.txt", "r") as f:
+        with open(os.path.join(data_dir,"roberta_stopwords.txt"), "r") as f:
             self.stopwords = set()
             for line in f:
                 self.stopwords.add(int(line.strip()))

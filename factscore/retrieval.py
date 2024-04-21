@@ -132,6 +132,7 @@ class Retrieval(object):
         assert self.batch_size is not None
     
     def load_cache(self):
+        print("(Retrieval) Loading cache from", self.cache_path)
         if os.path.exists(self.cache_path):
             with open(self.cache_path, "r") as f:
                 self.cache = json.load(f)
@@ -202,11 +203,6 @@ class Retrieval(object):
                 self.cache[cache_key] = self.get_gtr_passages(topic, retrieval_query, passages, k)
             assert len(self.cache[cache_key]) in [k, len(passages)]
             self.add_n += 1
-        
-            
+
         return self.cache[cache_key]
-
-        
-        
-
 
