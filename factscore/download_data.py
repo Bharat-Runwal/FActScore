@@ -73,12 +73,14 @@ def recover_instruct_llama(path_raw, output_path, device="cpu", test_recovered_m
         device_map={"": torch.device(device)},
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
+        cache_dir= output_path
     )
     model_recovered = transformers.AutoModelForCausalLM.from_pretrained(
         "kalpeshk2011/instruct-llama-7b-wdiff",
         device_map={"": torch.device(device)},
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
+         cache_dir= output_path
     )
 
     tokenizer_raw = transformers.AutoTokenizer.from_pretrained(path_raw)
